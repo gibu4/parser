@@ -1,4 +1,4 @@
-"""Собирает заказы с FL.ru, Kwork и Freelancehunt, фильтрует и отправляет в Telegram."""
+"""Собирает заказы с Freelance.ru и публичных Telegram-каналов, фильтрует и шлёт в Telegram."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ from pathlib import Path
 import requests
 
 from config import CHAT_ID, KEYWORDS, MAX_BUDGET, MIN_BUDGET, STOP_WORDS, TELEGRAM_BOT_TOKEN
-from parsers import Order, fl, freelancehunt, kwork
+from parsers import Order, freelance_ru, telegram
 
 log = logging.getLogger("parser")
 
 BASE_DIR = Path(__file__).resolve().parent
 SEEN_FILE = BASE_DIR / "seen_ids.json"
 SEEN_LIMIT = 2000
-PARSERS = (fl, kwork, freelancehunt)
+PARSERS = (freelance_ru, telegram)
 CURRENCY_SIGNS = {"RUB": "₽", "UAH": "₴", "USD": "$", "EUR": "€"}
 # Настоящий токен BotFather: "123456789:AAE...". Username сюда не подходит.
 TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]{20,}$")
@@ -55,7 +55,7 @@ def format_message(order: Order) -> str:
 
     description = re.sub(r"\s+", " ", order.description).strip()
     if len(description) > 400:
-        description = description[:400].rstrip() + "…"
+        description = description[:400].rsplit(" ", 1)[0] + "…"
 
     parts = [
         f"<b>🆕 {html.escape(order.source)}</b>",

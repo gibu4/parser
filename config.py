@@ -30,8 +30,9 @@ _load_env_file()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "@aihelperformebotbot")
 CHAT_ID = os.getenv("CHAT_ID", "1846569504")
 
-# Freelancehunt отдаёт заказы только по API-токену. Без него источник пропускается.
-FREELANCEHUNT_TOKEN = os.getenv("FREELANCEHUNT_TOKEN", "")
+# Публичные Telegram-каналы с заказами: читаются через веб-превью t.me/s/<канал>.
+# Можно добавить свои — главное, чтобы у канала было открыто веб-превью.
+ORDER_CHANNELS = ["freelance_zakazy", "frilans"]
 
 # Бюджетный фильтр, руб.
 MIN_BUDGET = 400
