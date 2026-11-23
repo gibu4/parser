@@ -1,8 +1,8 @@
-name: Freelance parser
+name: Lead finder
 
 on:
   schedule:
-    - cron: "*/30 * * * *" # каждые 30 минут (время UTC, GitHub может задержать запуск)
+    - cron: "0 6 * * *" # раз в день, 06:00 UTC = 09:00 МСК
   workflow_dispatch: # ручной запуск из вкладки Actions
 
 permissions:
@@ -31,7 +31,7 @@ jobs:
           key: seen-ids-${{ github.run_id }}
           restore-keys: seen-ids-
 
-      - name: Run parser
+      - name: Run lead finder
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}

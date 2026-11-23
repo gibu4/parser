@@ -1,4 +1,4 @@
-"""Собирает заказы с Freelance.ru и публичных Telegram-каналов, фильтрует и шлёт в Telegram."""
+"""Ищет местный бизнес без сайта в OpenStreetMap и присылает список в Telegram."""
 
 from __future__ import annotations
 
@@ -11,60 +11,35 @@ from pathlib import Path
 
 import requests
 
-from config import CHAT_ID, KEYWORDS, MAX_BUDGET, MIN_BUDGET, STOP_WORDS, TELEGRAM_BOT_TOKEN
-from parsers import Order, freelance_ru, telegram
+from config import AREA_NAME, CHAT_ID, MAX_LEADS, TELEGRAM_BOT_TOKEN
+from parsers import Lead, osm
 
-log = logging.getLogger("parser")
+log = logging.getLogger("leads")
 
 BASE_DIR = Path(__file__).resolve().parent
 SEEN_FILE = BASE_DIR / "seen_ids.json"
-SEEN_LIMIT = 2000
-PARSERS = (freelance_ru, telegram)
-CURRENCY_SIGNS = {"RUB": "₽", "UAH": "₴", "USD": "$", "EUR": "€"}
+SEEN_LIMIT = 5000
 # Настоящий токен BotFather: "123456789:AAE...". Username сюда не подходит.
 TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]{20,}$")
 
 
-def _word_re(word: str) -> re.Pattern[str]:
-    # Совпадение с начала слова: «бот» не должен ловить «работа», «сайт» — «посайти».
-    return re.compile(r"(?<![а-яёa-z])" + re.escape(word), re.IGNORECASE)
-
-
-_KEYWORD_RES = [_word_re(word) for word in KEYWORDS]
-_STOP_RES = [_word_re(word) for word in STOP_WORDS]
-
-
-def matches(order: Order) -> bool:
-    """Ключевое слово есть, стоп-слов нет, бюджет в диапазоне (неизвестный — пропускаем)."""
-    text = f"{order.title}\n{order.description}"
-    if not any(pattern.search(text) for pattern in _KEYWORD_RES):
-        return False
-    if any(pattern.search(text) for pattern in _STOP_RES):
-        return False
-    if order.budget is not None and not MIN_BUDGET <= order.budget <= MAX_BUDGET:
-        return False
-    return True
-
-
-def format_message(order: Order) -> str:
-    if order.budget is None:
-        budget = "не указан"
-    else:
-        sign = CURRENCY_SIGNS.get(order.currency, order.currency)
-        budget = f"{order.budget:,}".replace(",", " ") + f" {sign}"
-
-    description = re.sub(r"\s+", " ", order.description).strip()
-    if len(description) > 400:
-        description = description[:400].rsplit(" ", 1)[0] + "…"
-
-    parts = [
-        f"<b>🆕 {html.escape(order.source)}</b>",
-        f"<b>{html.escape(order.title)}</b>",
-        f"💰 Бюджет: {budget}",
-    ]
-    if description:
-        parts.append(html.escape(description))
-    parts.append(f'🔗 <a href="{html.escape(order.url, quote=True)}">Открыть заказ</a>')
+def format_digest(leads: list[Lead]) -> str:
+    parts = [f"🏪 <b>Клиенты без сайта</b> — {html.escape(AREA_NAME)}, {len(leads)} новых"]
+    for number, lead in enumerate(leads, 1):
+        lines = [f"<b>{number}. {html.escape(lead.name)}</b> — {html.escape(lead.category)}"]
+        details = []
+        if lead.phone:
+            icon = "🔗" if lead.phone.startswith("http") else "📞"
+            details.append(f"{icon} {html.escape(lead.phone)}")
+        if lead.address:
+            details.append(f"📍 {html.escape(lead.address)}")
+        if details:
+            lines.append(" · ".join(details))
+        links = [f'<a href="{html.escape(lead.map_url, quote=True)}">Карта</a>']
+        if lead.search_url:
+            links.append(f'<a href="{html.escape(lead.search_url, quote=True)}">Яндекс</a>')
+        lines.append(" · ".join(links))
+        parts.append("\n".join(lines))
     return "\n\n".join(parts)
 
 
@@ -99,49 +74,29 @@ def save_seen(seen: list[str]) -> None:
 def run(dry_run: bool = False) -> int:
     seen = load_seen()
     seen_set = set(seen)
-    sent = 0
+    leads = osm.fetch()
+    log.info("найдено лидов без сайта: %d", len(leads))
 
-    for module in PARSERS:
-        try:
-            orders = module.fetch()
-        except Exception as exc:
-            log.warning("%s: %s", module.__name__, exc)
-            continue
+    fresh = [lead for lead in leads if lead.id not in seen_set][:MAX_LEADS]
+    if not fresh:
+        log.info("новых лидов нет")
+        return 0
 
-        log.info("%s: получено %d заказов", module.__name__, len(orders))
-        for order in orders:
-            if order.id in seen_set or not matches(order):
-                continue
+    message = format_digest(fresh)
+    if dry_run:
+        print(re.sub(r"<[^>]+>", "", message))
+        return len(fresh)
 
-            if dry_run:
-                budget = order.budget if order.budget is not None else "не указан"
-                print(f"[{order.source}] {order.title} — {budget} — {order.url}")
-                seen_set.add(order.id)
-                sent += 1
-                continue
-
-            try:
-                send(format_message(order))
-            except Exception:
-                # не помечаем как отправленное, чтобы повторить на следующем запуске
-                log.exception("Telegram: не удалось отправить %s", order.id)
-                continue
-
-            seen.append(order.id)
-            seen_set.add(order.id)
-            sent += 1
-            log.info("Отправлено: %s — %s", order.source, order.title)
-
-    if not dry_run:
-        save_seen(seen)
-    log.info("Новых заказов: %d", sent)
-    return sent
+    send(message)
+    save_seen(seen + [lead.id for lead in fresh])
+    log.info("отправлено лидов: %d", len(fresh))
+    return len(fresh)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Парсер фриланс-заказов")
+    parser = argparse.ArgumentParser(description="Поиск бизнеса без сайта")
     parser.add_argument(
-        "--dry-run", action="store_true", help="показать найденное, ничего не отправляя"
+        "--dry-run", action="store_true", help="показать список, ничего не отправляя"
     )
     args = parser.parse_args()
 
