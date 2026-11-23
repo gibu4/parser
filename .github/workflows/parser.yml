@@ -1,0 +1,39 @@
+name: Freelance parser
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # каждые 30 минут (время UTC, GitHub может задержать запуск)
+  workflow_dispatch: # ручной запуск из вкладки Actions
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore seen ids
+        uses: actions/cache@v4
+        with:
+          path: seen_ids.json
+          key: seen-ids-${{ github.run_id }}
+          restore-keys: seen-ids-
+
+      - name: Run parser
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          FREELANCEHUNT_TOKEN: ${{ secrets.FREELANCEHUNT_TOKEN }}
+        run: python main.py
